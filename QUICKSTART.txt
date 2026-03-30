@@ -1,0 +1,43 @@
+╔════════════════════════════════════════════════════════════╗
+║              Local AI Lab - Quick Reference                ║
+╚════════════════════════════════════════════════════════════╝
+
+TRAIN LOCALLY (Fully Automated):
+────────────────────────────────
+lab train local --agent code --steps 100 --background --notify
+
+TRAIN ON COLAB (Manual Upload):
+───────────────────────────────
+lab train start --agent code --steps 100
+# Then upload to https://colab.research.google.com
+
+USE AGENTS:
+───────────
+lab agent spawn code
+lab chat --agent code
+lab multi demo --scenario feature-dev
+
+START WEB UI:
+─────────────
+lab server
+cd web-ui && npm run dev
+open http://localhost:3000
+
+MANAGE MODELS:
+──────────────
+lab model list
+lab model pull qwen2.5-coder-7b-instruct
+lab agent spawn code --model qwen2.5-coder:7b
+
+MONITOR TRAINING:
+─────────────────
+lab train status
+lab train status <job_id>
+watch -n 5 cat ~/.lab/local_training/progress_code.json
+
+HELP:
+─────
+lab --help
+lab train --help
+lab agent --help
+cat USAGE_GUIDE.md

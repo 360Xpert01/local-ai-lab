@@ -1,0 +1,116 @@
+version: '3.8'
+
+services:
+  # API Server (Python FastAPI)
+  api:
+    build:
+      context: ../cli
+      dockerfile: ../docker/Dockerfile.api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ~/.lab:/root/.lab
+      - ${PWD}/..:/workspace
+    environment:
+      - OLLAMA_HOST=http://host.docker.internal:11434
+    networks:
+      - lab-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # Security Agent (Rust)
+  security-agent:
+    build:
+      context: ../agents/security-agent
+      dockerfile: ../../docker/Dockerfile.security
+    ports:
+      - "8081:8081"
+    networks:
+      - lab-network
+
+  # Ops Agent (Go)
+  ops-agent:
+    build:
+      context: ../agents/ops-agent
+      dockerfile: ../../docker/Dockerfile.ops
+    ports:
+      - "8082:8082"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - lab-network
+
+  # Architect Agent (Node.js)
+  architect-agent:
+    build:
+      context: ../agents/architect-agent
+      dockerfile: ../../docker/Dockerfile.architect
+    ports:
+      - "8083:8083"
+    networks:
+      - lab-network
+
+  # Web UI (Next.js)
+  web-ui:
+    build:
+      context: ../web-ui
+      dockerfile: ../docker/Dockerfile.web
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - api
+    networks:
+      - lab-network
+
+  # Redis for message broker
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - lab-network
+
+  # MLflow for model tracking
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    ports:
+      - "5000:5000"
+    environment:
+      - MLFLOW_BACKEND_STORE_URI=sqlite:///mlflow.db
+      - MLFLOW_DEFAULT_ARTIFACT_ROOT=/mlflow/artifacts
+    volumes:
+      - mlflow-data:/mlflow
+    networks:
+      - lab-network
+
+  # Prometheus for metrics
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    networks:
+      - lab-network
+
+  # Grafana for dashboards
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - lab-network
+
+networks:
+  lab-network:
+    driver: bridge
+
+volumes:
+  mlflow-data:
+  prometheus-data:
+  grafana-data:

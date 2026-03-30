@@ -1,0 +1,340 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "provenance": [],
+      "gpuType": "T4"
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "language_info": {
+      "name": "python"
+    },
+    "accelerator": "GPU"
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "# Fine-tuning: {{ model.name }}\n",
+        "\n",
+        "**Agent Type:** {{ agent.name }}\n",
+        "\n",
+        "**Base Model:** {{ model.name }} ({{ model.parameters }})\n",
+        "\n",
+        "**Training Config:**\n",
+        "- LoRA r: {{ training.lora_r }}\n",
+        "- Max Steps: {{ training.max_steps }}\n",
+        "- Learning Rate: {{ training.learning_rate }}\n",
+        "\n",
+        "This notebook fine-tunes the model for specialized {{ agent.slug }} tasks."
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 1. Install Dependencies"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {},
+      "source": [
+        "# Install Unsloth for efficient fine-tuning\n",
+        "!pip install \"unsloth[cu121-torch240] @ git+https://github.com/unslothai/unsloth.git\" --quiet\n",
+        "\n",
+        "# Install other required packages\n",
+        "!pip install transformers==4.44.2 trl datasets accelerate --quiet\n",
+        "\n",
+        "print(\"✓ Dependencies installed\")"
+      ],
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 2. Load Base Model"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {},
+      "source": [
+        "import torch\n",
+        "from unsloth import FastLanguageModel\n",
+        "\n",
+        "# Model configuration\n",
+        "max_seq_length = 2048  # Can increase to 4096 on Colab Pro\n",
+        "dtype = None  # Auto-detection\n",
+        "load_in_4bit = True  # 4-bit quantization for memory efficiency\n",
+        "\n",
+        "# Load the model\n",
+        "model, tokenizer = FastLanguageModel.from_pretrained(\n",
+        "    model_name=\"{{ model.huggingface_id }}\",\n",
+        "    max_seq_length=max_seq_length,\n",
+        "    dtype=dtype,\n",
+        "    load_in_4bit=load_in_4bit,\n",
+        ")\n",
+        "\n",
+        "print(f\"✓ Loaded model: {{ model.name }}\")\n",
+        "print(f\"✓ Parameters: {{ model.parameters }}\")\n",
+        "print(f\"✓ Sequence length: {max_seq_length}\")"
+      ],
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 3. Setup LoRA Adapters"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {},
+      "source": [
+        "# Configure LoRA for efficient fine-tuning\n",
+        "model = FastLanguageModel.get_peft_model(\n",
+        "    model,\n",
+        "    r={{ training.lora_r }},  # LoRA rank\n",
+        "    target_modules=[\n",
+        "        \"q_proj\", \"k_proj\", \"v_proj\", \"o_proj\",\n",
+        "        \"gate_proj\", \"up_proj\", \"down_proj\",\n",
+        "    ],\n",
+        "    lora_alpha={{ training.lora_alpha }},\n",
+        "    lora_dropout=0,  # Optimized for speed\n",
+        "    bias=\"none\",\n",
+        "    use_gradient_checkpointing=\"unsloth\",\n",
+        "    random_state=3407,\n",
+        "    use_rslora=False,\n",
+        "    loftq_config=None,\n",
+        ")\n",
+        "\n",
+        "print(\"✓ LoRA adapters configured\")"
+      ],
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 4. Prepare Training Data"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {},
+      "source": [
+        "from datasets import load_dataset\n",
+        "\n",
+        "# Alpaca-style prompt template\n",
+        "alpaca_prompt = \"\"\"### Instruction:\n",
+        "{}\n",
+        "\n",
+        "### Input:\n",
+        "{}\n",
+        "\n",
+        "### Response:\n",
+        "{}\"\"\"\n",
+        "\n",
+        "EOS_TOKEN = tokenizer.eos_token  # Must add EOS_TOKEN\n",
+        "\n",
+        "def formatting_prompts_func(examples):\n",
+        "    instructions = examples[\"instruction\"]\n",
+        "    inputs = examples[\"input\"]\n",
+        "    outputs = examples[\"output\"]\n",
+        "    texts = []\n",
+        "    for instruction, input, output in zip(instructions, inputs, outputs):\n",
+        "        text = alpaca_prompt.format(instruction, input, output) + EOS_TOKEN\n",
+        "        texts.append(text)\n",
+        "    return {\"text\": texts}\n",
+        "\n",
+        "# Load training data\n",
+        "# Upload your training_data.jsonl file first!\n",
+        "dataset = load_dataset(\"json\", data_files=\"training_data.jsonl\", split=\"train\")\n",
+        "dataset = dataset.map(formatting_prompts_func, batched=True)\n",
+        "\n",
+        "print(f\"✓ Loaded {len(dataset)} training examples\")\n",
+        "print(\"\\nSample training example:\")\n",
+        "print(dataset[0]['text'][:500] + \"...\")"
+      ],
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 5. Configure Training"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {},
+      "source": [
+        "from trl import SFTTrainer\n",
+        "from transformers import TrainingArguments\n",
+        "\n",
+        "trainer = SFTTrainer(\n",
+        "    model=model,\n",
+        "    tokenizer=tokenizer,\n",
+        "    train_dataset=dataset,\n",
+        "    dataset_text_field=\"text\",\n",
+        "    max_seq_length=max_seq_length,\n",
+        "    dataset_num_proc=2,\n",
+        "    packing=False,  # Can make training 5x faster for short sequences\n",
+        "    args=TrainingArguments(\n",
+        "        per_device_train_batch_size=2,\n",
+        "        gradient_accumulation_steps=4,\n",
+        "        warmup_steps=5,\n",
+        "        max_steps={{ training.max_steps }},\n",
+        "        learning_rate={{ training.learning_rate }},\n",
+        "        fp16=not torch.cuda.is_bf16_supported(),\n",
+        "        bf16=torch.cuda.is_bf16_supported(),\n",
+        "        logging_steps=1,\n",
+        "        optim=\"adamw_8bit\",\n",
+        "        weight_decay=0.01,\n",
+        "        lr_scheduler_type=\"linear\",\n",
+        "        seed=3407,\n",
+        "        output_dir=\"outputs\",\n",
+        "        report_to=\"none\",  # Disable WandB\n",
+        "    ),\n",
+        ")\n",
+        "\n",
+        "print(\"✓ Training configured\")\n",
+        "print(f\"  Batch size: 2\")\n",
+        "print(f\"  Gradient accumulation: 4\")\n",
+        "print(f\"  Effective batch size: 8\")\n",
+        "print(f\"  Max steps: {{ training.max_steps }}\")\n",
+        "print(f\"  Learning rate: {{ training.learning_rate }}\")"
+      ],
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 6. Train!"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {},
+      "source": [
+        "# Start training\n",
+        "print(\"Starting training...\")\n",
+        "trainer_stats = trainer.train()\n",
+        "\n",
+        "print(f\"\\n✓ Training completed!\")\n",
+        "print(f\"Training time: {trainer_stats.metrics['train_runtime']:.2f} seconds\")\n",
+        "print(f\"Final loss: {trainer_stats.training_loss:.4f}\")"
+      ],
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 7. Test the Fine-tuned Model"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {},
+      "source": [
+        "# Test inference\n",
+        "from transformers import TextStreamer\n",
+        "\n",
+        "# Prepare model for inference\n",
+        "FastLanguageModel.for_inference(model)\n",
+        "\n",
+        "# Test prompt\n",
+        "test_instruction = \"{{ test_instruction or 'Write a Python function to reverse a string' }}\"\n",
+        "test_input = \"{{ test_input or '' }}\"\n",
+        "\n",
+        "inputs = tokenizer(\n",
+        "    [alpaca_prompt.format(test_instruction, test_input, \"\")],\n",
+        "    return_tensors=\"pt\"\n",
+        ").to(\"cuda\")\n",
+        "\n",
+        "text_streamer = TextStreamer(tokenizer)\n",
+        "print(\"Test output:\")\n",
+        "_ = model.generate(\n",
+        "    **inputs,\n",
+        "    streamer=text_streamer,\n",
+        "    max_new_tokens=256,\n",
+        ")"
+      ],
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 8. Save to GGUF for Ollama"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {},
+      "source": [
+        "# Save as GGUF for Ollama compatibility\n",
+        "model_name = \"lab-{{ agent.slug }}-{{ model.family }}\"\n",
+        "\n",
+        "# Save with Q4_K_M quantization (good balance of quality and size)\n",
+        "model.save_pretrained_gguf(\n",
+        "    model_name,\n",
+        "    tokenizer,\n",
+        "    quantization_method=\"q4_k_m\"\n",
+        ")\n",
+        "\n",
+        "print(f\"✓ Model saved as GGUF: {model_name}/unsloth.Q4_K_M.gguf\")\n",
+        "print(\"\\nTo use with Ollama:\")\n",
+        "print(f\"1. Download the GGUF file\")\n",
+        "print(f\"2. Create a Modelfile:\")\n",
+        "print(f\"   FROM ./{model_name}/unsloth.Q4_K_M.gguf\")\n",
+        "print(f\"3. Run: ollama create {model_name} -f Modelfile\")"
+      ],
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "## 9. Download the Model"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {},
+      "source": [
+        "# Download the GGUF file\n",
+        "from google.colab import files\n",
+        "\n",
+        "gguf_path = f\"{model_name}/unsloth.Q4_K_M.gguf\"\n",
+        "files.download(gguf_path)\n",
+        "\n",
+        "print(f\"\\n✓ Download started: {gguf_path}\")\n",
+        "print(\"\\nNext steps:\")\n",
+        "print(\"1. Move the downloaded file to your local-llm-architecture/local_setup/ folder\")\n",
+        "print(\"2. Run: ./import_model.sh\")\n",
+        "print(\"3. Test with: ollama run lab-{{ agent.slug }}-{{ model.family }}\")"
+      ],
+      "outputs": []
+    }
+  ]
+}
