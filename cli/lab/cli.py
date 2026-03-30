@@ -10,6 +10,7 @@ from .commands.file import file_cmd
 from .commands.chat import chat
 from .commands.train import train
 from .commands.multi_agent import multi
+from .commands.plan import plan
 
 console = Console()
 
@@ -33,6 +34,7 @@ main.add_command(file_cmd, name="file")
 main.add_command(chat)
 main.add_command(train)
 main.add_command(multi)
+main.add_command(plan)
 
 
 @main.command()
