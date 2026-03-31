@@ -1,0 +1,22 @@
+{
+  "total_examples": 48,
+  "breakdown": {
+    "training_data/advanced/coding": 4,
+    "training_data/advanced/architecture": 3,
+    "training_data/advanced/testing": 3,
+    "training_data/code": 31,
+    "training_data/architecture": 2,
+    "training_data/security": 5
+  },
+  "files_generated": [
+    "training_data/advanced_combined_raw.jsonl",
+    "training_data/advanced_combined_formatted.json"
+  ],
+  "categories": {
+    "advanced_coding": 4,
+    "architecture": 3,
+    "testing": 3,
+    "code_frameworks": 31,
+    "security": 5
+  }
+}
